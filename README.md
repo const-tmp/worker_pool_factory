@@ -1,30 +1,8 @@
-# ezwp
+# worker_pool_factory
 Easy-to-use,  no-dep, generic-based worker pool implementation, written in Go 1.18
 # Installation
 ```
-go get -u github.com/h1ght1me/ezwp
+go get -u github.com/h1ght1me/worker_pool_factory
 ```
 # Usage
-```
-package main
-
-import (
-	"fmt"
-	"github.com/h1ght1me/ezwp"
-)
-
-func main() {
-	wp := ezwp.New[int, string](
-		ezwp.Options[int, string]{
-			Payload: func(i int) (string, error) {
-				return fmt.Sprint(i), nil
-			},
-		},
-		[]int{1, 2, 3, 4, 5},
-	)
-
-	for r := range wp.Run() {
-		fmt.Println(r)
-	}
-}
-```
+see examples [task list](examples/task_list/main.go) and [producer](examples/producer/main.go)
