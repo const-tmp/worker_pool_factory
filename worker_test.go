@@ -1,16 +1,15 @@
 package worker_pool_factory
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"testing"
 	"time"
 )
 
-var nWorkers = []uint{0, 1, 5}
-var taskQueueSize = []uint{0, 1, 5}
-var resultQueueSize = []uint{0, 1, 5}
+var nWorkers = []uint{0, 1, 2}
+var taskQueueSize = []uint{0, 1, 2}
+var resultQueueSize = []uint{0, 1, 2}
 
 const n = 4
 
@@ -42,14 +41,14 @@ func TestPow(t *testing.T) {
 	}
 }
 
-func genCases(n int) ([]int, []result[string]) {
+func genCases(n int) ([]int, []Result[string]) {
 	var (
 		t []int
-		r []result[string]
+		r []Result[string]
 	)
 	for i := 0; i < pow(10, n); i++ {
 		t = append(t, i)
-		r = append(r, result[string]{Result: fmt.Sprint(i), Error: nil})
+		r = append(r, Result[string]{Result: fmt.Sprint(i), Error: nil})
 	}
 	return t, r
 }
@@ -59,23 +58,44 @@ func TestRunTasks(t *testing.T) {
 		for _, tqs := range taskQueueSize {
 			for _, rqs := range resultQueueSize {
 				for i := 0; i < n; i++ {
-					name := fmt.Sprintf("run tasks %d %d %d %d ", nWorker, tqs, rqs, i)
+					name := fmt.Sprintf("run Tasks %d %d %d %d ", nWorker, tqs, rqs, i)
 					t.Run(name, func(t *testing.T) {
 						tasks, want := genCases(i)
+
+						var tc chan int
+						if tqs == 0 {
+							tc = make(chan int)
+						} else {
+							tc = make(chan int, tqs)
+						}
+
+						var rc chan Result[string]
+						if rqs == 0 {
+							rc = make(chan Result[string])
+						} else {
+							rc = make(chan Result[string], rqs)
+						}
 
 						wp := WorkerPoolFactory[int, string]{
 							Payload: func(i int) (string, error) {
 								return fmt.Sprint(i), nil
 							},
-							NWorkers:        nWorker,
-							TaskQueueSize:   tqs,
-							ResultQueueSize: rqs,
-							LoggerPrefix:    name,
+							NWorkers:     nWorker,
+							Tasks:        tc,
+							Results:      rc,
+							LoggerPrefix: name,
 						}
-						pool := wp.Create()
+						wp.Run()
+						go func() {
+							for _, task := range tasks {
+								tc <- task
+							}
+							close(tc)
+						}()
 
-						got := make([]result[string], 0, len(tasks))
-						for r := range pool.RunTasks(tasks) {
+						got := make([]Result[string], 0, len(tasks))
+						for r := range rc {
+							t.Log("got", r)
 							got = append(got, r)
 						}
 						if len(got) != len(want) {
@@ -98,52 +118,6 @@ func randomTicker(minMs, maxMs int) <-chan struct{} {
 		}
 	}()
 	return c
-}
-
-func TestRunWithContext(t *testing.T) {
-	for _, nWorker := range nWorkers {
-		for _, tqs := range taskQueueSize {
-			for _, rqs := range resultQueueSize {
-				name := fmt.Sprintf("run with context %d %d %d ", nWorker, tqs, rqs)
-				t.Run(name, func(t *testing.T) {
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer cancel()
-
-					f := WorkerPoolFactory[int, string]{
-						Payload: func(i int) (string, error) {
-							return fmt.Sprint(i), nil
-						},
-						NWorkers:        nWorker,
-						TaskQueueSize:   tqs,
-						TaskCtx:         ctx,
-						ResultQueueSize: rqs,
-						ResultCtx:       ctx,
-						LoggerPrefix:    name,
-					}
-					wp := f.Create()
-					results := wp.RunWithContext()
-					go func() {
-						ticker := randomTicker(50, 300)
-						var i int
-						for {
-							select {
-							case <-ctx.Done():
-								t.Log("producer ctx done")
-								return
-							case <-ticker:
-								i++
-								t.Log("putting task:", i)
-								wp.AddTask(i)
-							}
-						}
-					}()
-					for r := range results {
-						t.Log("result:", r.Result)
-					}
-				})
-			}
-		}
-	}
 }
 
 func TestChanClosing(t *testing.T) {
